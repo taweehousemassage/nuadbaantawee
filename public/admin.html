@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>หน้าพี่หนึ่ง · นวดเส้นบ้านทวี</title>
+<meta name="theme-color" content="#211210">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chonburi&family=Sarabun:wght@400;500;600;700&family=Noto+Sans+Thai:wght@600;800&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar"><span class="tb-home">หน้าพี่หนึ่ง</span><a class="btn ghost sm" href="/" target="_blank">หน้าลูกค้า ↗</a></div>
+<main class="wrap wide"><section class="pane" id="app"></section></main>
+<div id="sheet"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/vendor/qrcode-generator.js"></script>
+<script type="module">
+import { $, esc, thn, DAYN, api, toast, drawQR, shareHref } from '/shared.js';
+import { toT, thDate, baht, TEMPLATES } from '/messages.js';
+
+let PASS = ''; try { PASS = sessionStorage.getItem('nuad_pass') || ''; } catch {}
+let D = null, sheet = null, busy = false, setOpen = false, fareEdit = {};
+const adm = (url, opts = {}) => api(url, { ...opts, headers: { 'x-nuad-password': PASS } });
+
+function rLogin(err) {
+  $('#app').innerHTML = `<h2 class="step">เข้าหน้าพี่หนึ่ง</h2><form class="form" id="login">
+    <label for="pw">รหัสผ่าน</label><input id="pw" type="password" autocomplete="current-password" required>
+    ${err ? `<p class="err">${esc(err)}</p>` : ''}<button class="btn primary big">เข้าสู่ระบบ</button></form>`;
+  $('#pw').focus();
+  $('#login').onsubmit = async (e) => {
+    e.preventDefault(); PASS = $('#pw').value;
+    try { await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ password: PASS }) }); try { sessionStorage.setItem('nuad_pass', PASS); } catch {} await load(); }
+    catch (er) { rLogin(er.message); }
+  };
+}
+async function load() {
+  try { D = await adm('/api/admin/today'); render(); }
+  catch (e) { if (/รหัสผ่าน|ADMIN/.test(e.message)) { PASS = ''; rLogin(e.message); } else toast(e.message); }
+}
+setInterval(() => { if (PASS && D && !sheet && !busy && !document.hidden && !document.activeElement?.matches('input')) load(); }, 12000);
+
+const ST = { requested: ['รอรับงาน', 'c-hold'], negotiate: ['กำลังคุย', 'c-hold'], accepted: ['รับงานแล้ว รอโอน', 'c-slip'], slip: ['ส่งสลิปแล้ว', 'c-slip'],
+  paid: ['โอนแล้ว', 'c-paid'], done: ['เสร็จงาน', 'c-done'], declined: ['ไม่รับ', 'c-no'], cancelled: ['ยกเลิก', 'c-exp'],
+  booked: ['จองแล้ว', 'c-paid'], noshow: ['ไม่มา', 'c-no'] };
+const chip = (st) => `<span class="chip ${(ST[st] || ['-', 'c-done'])[1]}">${(ST[st] || ['-'])[0]}</span>`;
+const lineChip = (x) => (x.linked ? '<span class="chip c-line">LINE</span>' : '');
+const mapLink = (p) => (p?.lat && p?.lng ? `<a href="https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}" target="_blank" rel="noopener">เปิดแผนที่ ↗</a>` : '');
+
+function jobCard(b) {
+  const total = (b.travel || 0) + (b.teacherMin || 0);
+  const km = fareEdit[b.id]?.km ?? b.km ?? '';
+  return `<div class="job"><div class="job-h"><b>${esc(b.name)} ${chip(b.status)} ${lineChip(b)}</b><span class="jid">${b.id}</span></div>
+    <div class="job-b">
+      <div>🗓️ ${thDate(b.date)} · <b>${toT(b.from)}–${toT(b.to)} น.</b></div>
+      <div>📍 ${esc(b.place?.text || '-')} ${mapLink(b.place)}</div>
+      <div>📞 <a href="tel:${esc(b.phone)}">${esc(b.phone)}</a>${b.note ? ' · 📝 ' + esc(b.note) : ''}</div>
+      <div class="fare"><div><span>ระยะทาง${b.estimated ? ' (ประมาณ)' : ''}</span><b>${b.km ?? '-'} กม.</b></div>
+        <div><span>ค่าเดินทาง</span><b>${baht(b.travel)} ฿</b></div>
+        <div class="total"><span>รวมกับค่าครู ${baht(b.teacherMin)}</span><b>${baht(total)} ฿</b></div></div>
+      ${['requested', 'negotiate'].includes(b.status) ? `<div class="range" style="grid-template-columns:auto 1fr auto">
+        <span class="hint">แก้ระยะทาง</span><input inputmode="decimal" data-km="${b.id}" value="${km}" placeholder="กม."><span class="hint">กม.</span></div>` : ''}
+    </div>
+    <div class="acts">${['requested', 'negotiate'].includes(b.status)
+      ? `<button class="btn primary sm" data-a="out" data-v="${b.id}:accept">✓ รับงาน</button>
+         <button class="btn ghost sm" data-a="out" data-v="${b.id}:negotiate">ขอคุยเพิ่ม</button>
+         <button class="btn ghost sm" data-a="out" data-v="${b.id}:decline">ไม่รับ</button>`
+      : `${['accepted', 'slip'].includes(b.status) ? `<button class="btn primary sm" data-a="out" data-v="${b.id}:paid">ได้รับเงินแล้ว</button>` : ''}
+         ${b.status === 'paid' ? `<button class="btn ghost sm" data-a="out" data-v="${b.id}:done">เสร็จงาน</button>` : ''}
+         <button class="btn ghost sm" data-a="out" data-v="${b.id}:cancelled">ยกเลิก</button>`}
+      <button class="btn line sm" data-a="msg" data-v="${b.id}">ส่งข้อความ</button></div></div>`;
+}
+
+function render() {
+  const s = D.settings, n = D.now;
+  const q = D.queue, sv = q.find((x) => x.status === 'serving'), wait = q.filter((x) => x.status === 'waiting');
+  const domeToday = D.dome.filter((b) => b.date === n.date);
+  let h = '';
+  if (!D.line.on) h += `<div class="note info">ยังไม่ได้ต่อ LINE อัตโนมัติ — ข้อความต้องกดส่งเอง (ตั้ง LINE_* ใน Render)</div>`;
+  if (D.storage === 'file') h += `<div class="note bad">ยังไม่ได้ต่อฐานข้อมูล — ข้อมูลจะหายตอนอัปเดตเว็บ (ตั้ง MONGODB_URI)</div>`;
+  if (!s.origin?.lat) h += `<div class="note bad">ยังไม่ได้ตั้งจุดเริ่มต้น "${esc(s.origin?.label || '')}" — ระบบยังคิดค่าเดินทางให้ไม่ได้ ใส่ลิงก์ Google Maps ในหัวข้อตั้งค่าด้านล่าง</div>`;
+
+  h += `<div class="stats">
+    <div class="stat ${D.pending.length ? 'alert' : ''}"><b>${D.pending.length}</b><span>งานรอตอบ</span></div>
+    <div class="stat"><b>${domeToday.length}</b><span>คิวโดมวันนี้</span></div>
+    <div class="stat"><b>${wait.length}</b><span>บัตรคิวรอ</span></div>
+    <div class="stat"><b>${D.outcall.filter((b) => ['accepted', 'slip', 'paid'].includes(b.status)).length}</b><span>งานนอกที่รับแล้ว</span></div></div>`;
+
+  h += `<h3 class="sec">🚗 งานนอกสถานที่ที่รอคำตอบ</h3>`;
+  h += D.pending.length ? D.pending.map(jobCard).join('') : `<p class="hint">ยังไม่มีคำขอใหม่</p>`;
+
+  if (D.outcall.length) h += `<h3 class="sec">งานนอกสถานที่ที่นัดไว้</h3>` + D.outcall.map(jobCard).join('');
+
+  h += `<h3 class="sec">🏛️ คิวโดมผู้สูงอายุ <small>${thDate(n.date)}</small></h3>`;
+  h += domeToday.length ? `<ul class="list">${domeToday.map((b) => `<li class="item ${['cancelled', 'noshow'].includes(b.status) ? 'dim' : ''}"><span class="k">${toT(b.time)}</span>
+      <div class="who"><b>${esc(b.name)} ${chip(b.status)} ${lineChip(b)}</b><small>รหัส ${b.id} · <a href="tel:${esc(b.phone)}">${esc(b.phone)}</a></small></div>
+      <div class="acts">${b.status === 'booked' ? `<button class="btn primary sm" data-a="dome" data-v="${b.id}:done">นวดเสร็จ</button>
+        <button class="btn ghost sm" data-a="dome" data-v="${b.id}:noshow">ไม่มา</button><button class="btn ghost sm" data-a="dome" data-v="${b.id}:cancelled">ยกเลิก</button>` : ''}</div></li>`).join('')}</ul>`
+    : `<p class="hint">วันนี้ยังไม่มีคิวโดม</p>`;
+  const domeNext = D.dome.filter((b) => b.date > n.date);
+  if (domeNext.length) h += `<details class="box"><summary>คิวโดมวันถัดไป (${domeNext.length})</summary><ul class="list">${domeNext.map((b) => `<li class="item"><span class="k">${toT(b.time)}<small>${thDate(b.date).replace('วัน', '')}</small></span><div class="who"><b>${esc(b.name)} ${chip(b.status)}</b><small>${esc(b.phone)}</small></div><div class="acts"><button class="btn ghost sm" data-a="dome" data-v="${b.id}:cancelled">ยกเลิก</button></div></li>`).join('')}</ul></details>`;
+
+  h += `<h3 class="sec">🎫 บัตรคิวหน้าร้าน</h3>
+    <div class="serving"><div class="sv-l"><span class="eyebrow">กำลังนวด</span>${sv
+      ? `<div class="sv-no">${thn(sv.no)}</div><div class="sv-who">${esc(sv.name)}<small>เริ่ม ${toT(sv.startedMin || 0)} น.</small></div>`
+      : `<div class="sv-who">ว่างอยู่<small>พร้อมรับคิวถัดไป</small></div>`}</div>
+      <div class="sv-a">${wait.length ? `<button class="btn primary big" data-a="next">${sv ? 'เสร็จแล้ว · เรียกคิวถัดไป' : 'เรียกคิวถัดไป'}</button>`
+        : sv ? `<button class="btn primary big" data-a="q" data-v="${sv.no}:done">นวดเสร็จแล้ว</button>` : `<button class="btn primary big" disabled>ยังไม่มีคิวรอ</button>`}</div></div>`;
+  if (wait.length) h += `<ul class="list">${wait.map((x) => `<li class="item"><span class="k">${x.no}</span>
+      <div class="who"><b>${esc(x.name)} ${lineChip(x)}${x.slipAt && !x.paid ? ' <span class="chip c-slip">ส่งสลิปแล้ว</span>' : ''}${x.paid ? ' <span class="chip c-paid">จ่ายแล้ว</span>' : ''}</b><small>ประมาณ ${x.est != null ? toT(x.est) + ' น.' : '-'}</small></div>
+      <div class="acts"><button class="btn line sm" data-a="msgq" data-v="${x.no}">ส่งข้อความ</button>${x.paid ? '' : `<button class="btn ghost sm" data-a="q" data-v="${x.no}:paid">ได้รับเงิน</button>`}<button class="btn ghost sm" data-a="q" data-v="${x.no}:skip">ข้าม</button><button class="btn ghost sm" data-a="q" data-v="${x.no}:noshow">ไม่มา</button></div></li>`).join('')}</ul>`;
+
+  h += `<details class="box no-print"><summary>QR หน้าร้าน สำหรับรับบัตรคิว</summary><div style="display:grid;justify-items:center;gap:8px;padding:8px 0 12px">
+    <div class="qr" id="walk-qr"></div><p class="hint">${esc(location.origin)}/?walk=1</p><button class="btn ghost sm" data-a="print">พิมพ์</button></div></details>`;
+
+  h += `<details class="box" id="settings" ${setOpen ? 'open' : ''}><summary>ตั้งค่าร้าน</summary><form class="form" id="setform">
+    <label for="st-shop">ชื่อร้าน</label><input id="st-shop" name="shopName" value="${esc(s.shopName)}">
+    <label for="st-th">ชื่อหมอนวด (ลงท้ายข้อความ)</label><input id="st-th" name="therapist" value="${esc(s.therapist)}">
+    <label for="st-pp">พร้อมเพย์</label><input id="st-pp" name="pp" inputmode="numeric" value="${esc(s.pp || '')}">
+    <label for="st-olabel">จุดเริ่มต้นเดินทาง (ชื่อ)</label><input id="st-olabel" name="originLabel" value="${esc(s.origin?.label || '')}">
+    <label for="st-olink">พิกัดจุดเริ่มต้น — วางลิงก์ Google Maps หรือ 14.98, 102.09</label>
+    <input id="st-olink" name="originLink" placeholder="${s.origin?.lat ? s.origin.lat + ', ' + s.origin.lng : 'ยังไม่ได้ตั้ง'}">
+    <div class="grid2">
+      <div><label for="st-teacher">ค่าครูขั้นต่ำ (บาท)</label><input id="st-teacher" name="teacherMin" type="number" min="0" value="${s.teacherMin}"></div>
+      <div><label for="st-start">ค่ามิเตอร์เริ่มต้น</label><input id="st-start" name="taxiStart" type="number" min="0" value="${s.taxi?.start ?? 35}"></div>
+      <div><label for="st-dopen">โดมเปิด</label><input id="st-dopen" name="domeOpen" type="time" value="${s.dome.open}"></div>
+      <div><label for="st-dclose">โดมปิด</label><input id="st-dclose" name="domeClose" type="time" value="${s.dome.close}"></div>
+      <div><label for="st-dslot">โดม ครั้งละ (นาที)</label><input id="st-dslot" name="domeSlot" type="number" min="5" max="120" step="5" value="${s.dome.slotMin}"></div>
+      <div><label for="st-qslot">บัตรคิว ครั้งละ (นาที)</label><input id="st-qslot" name="queueSlot" type="number" min="15" max="240" step="15" value="${s.queue.slotMin}"></div>
+      <div><label for="st-oopen">นอกสถานที่ เริ่ม</label><input id="st-oopen" name="outOpen" type="time" value="${s.outcall.open}"></div>
+      <div><label for="st-oclose">นอกสถานที่ ถึง</label><input id="st-oclose" name="outClose" type="time" value="${s.outcall.close}"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="roundTrip" ${s.roundTrip !== false ? 'checked' : ''}> คิดค่าเดินทางไป-กลับ (×2)</label>
+    <label class="check"><input type="checkbox" name="domeOn" ${s.dome.on ? 'checked' : ''}> เปิดรับจองคิวโดม</label>
+    <label class="check"><input type="checkbox" name="outOn" ${s.outcall.on ? 'checked' : ''}> เปิดรับงานนอกสถานที่</label>
+    <label class="check"><input type="checkbox" name="queueOn" ${s.queue.on ? 'checked' : ''}> เปิดรับบัตรคิวหน้าร้าน</label>
+    <label class="check"><input type="checkbox" name="notifyOwner" ${s.notifyOwner ? 'checked' : ''}> แจ้งงานใหม่/สลิปใหม่เข้าไลน์ของฉัน</label>
+    <label class="check"><input type="checkbox" name="autoRemind" ${s.autoRemind ? 'checked' : ''}> เตือนลูกค้าล่วงหน้า 1 วัน (หลัง 18:00)</label>
+    <label for="st-notices">ข้อความ 3 บรรทัดบนหัวเว็บ (บรรทัดละอัน)</label>
+    <textarea id="st-notices" name="notices" rows="3">${esc((s.notices || []).join('\n'))}</textarea>
+    <p class="hint">LINE: ${D.line.on ? 'อัตโนมัติ ✓ ' + esc(D.line.oaId || '') : 'กดส่งเอง'} · บัญชีพี่หนึ่ง: ${s.ownerLinked ? 'ผูกแล้ว' : D.line.ownerCodeSet ? 'ยังไม่ผูก — ทักแชท OA ว่า "ผูกหมอนวด <รหัสลับ>"' : 'ยังไม่ได้ตั้ง OWNER_CODE'}</p>
+    <button class="btn primary">บันทึก</button></form></details>
+    <p class="hint no-print" style="text-align:center"><a href="#" data-a="logout">ออกจากระบบ</a></p>`;
+
+  $('#app').innerHTML = h;
+  const wq = $('#walk-qr'); if (wq) drawQR(wq, location.origin + '/?walk=1');
+  $('#settings').ontoggle = (e) => { setOpen = e.target.open; };
+  $('#setform').onsubmit = saveSettings;
+  document.querySelectorAll('[data-km]').forEach((el) => el.addEventListener('input', () => { fareEdit[el.dataset.km] = { km: el.value }; }));
+  renderSheet();
+}
+
+function renderSheet() {
+  if (!sheet) { $('#sheet').innerHTML = ''; return; }
+  const rec = sheet.kind === 'q' ? D.queue.find((x) => x.no === sheet.no) : [...D.pending, ...D.outcall, ...D.dome].find((b) => b.id === sheet.id);
+  if (!rec) { sheet = null; return; }
+  const s = D.settings, auto = rec.linked && D.line.on && !sheet.manual;
+  const kinds = sheet.kind === 'q' ? ['turn', 'next', 'late', 'paid', 'thanks']
+    : rec.kind === 'dome' ? ['domeConfirm', 'remind', 'late', 'thanks']
+    : ['outAccepted', 'outNegotiate', 'outDeclined', 'paid', 'thanks'];
+  $('#sheet').innerHTML = `<div class="scrim" data-a="close"></div><div class="sheet" role="dialog">
+    <div class="sh-h"><b>ส่งข้อความถึง ${esc(rec.name)}</b><button class="x" data-a="close">×</button></div>
+    <p class="hint">${auto ? 'ผูกไลน์แล้ว — แตะแล้วระบบส่งให้ทันที' : 'ยังไม่ผูกไลน์ — แตะแล้วเปิดแอปไลน์พร้อมข้อความ เลือกแชทลูกค้าแล้วกดส่ง'}</p>
+    ${kinds.map((k) => { const t = TEMPLATES[k]; if (!t) return ''; const text = t.text(s, rec);
+      return auto ? `<button class="tpl" data-a="send" data-v="${sheet.kind === 'q' ? 'q:' + rec.no : 'b:' + rec.id}|${k}"><b>${t.label}</b><span>${esc(text)}</span></button>`
+        : `<a class="tpl" href="${shareHref(text)}" target="_blank" rel="noopener" data-a="shared"><b>${t.label}</b><span>${esc(text)}</span></a>`; }).join('')}
+  </div>`;
+}
+
+function results(rs = []) {
+  const sent = rs.filter((r) => r.sent), manual = rs.filter((r) => r.text && !r.sent);
+  if (sent.length) toast('ส่งไลน์แล้ว: ' + sent.map((r) => r.name).join(', '));
+  if (manual.length) { const r = manual[0]; toast(`${r.name} ยังไม่ผูกไลน์ — กดส่งเองได้ที่ปุ่มส่งข้อความ`); }
+}
+async function act(url, body) {
+  busy = true;
+  try { const r = await adm(url, { method: 'POST', body: JSON.stringify(body || {}) }); await load(); results(r.results); }
+  catch (e) { toast(e.message); }
+  busy = false;
+}
+async function saveSettings(e) {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const body = { shopName: f.get('shopName'), therapist: f.get('therapist'), pp: f.get('pp'),
+    originLabel: f.get('originLabel'), originLink: f.get('originLink'), teacherMin: f.get('teacherMin'), taxiStart: f.get('taxiStart'),
+    roundTrip: f.has('roundTrip'), notifyOwner: f.has('notifyOwner'), autoRemind: f.has('autoRemind'),
+    notices: String(f.get('notices') || '').split('\n').map((x) => x.trim()).filter(Boolean),
+    dome: { on: f.has('domeOn'), open: f.get('domeOpen'), close: f.get('domeClose'), slotMin: f.get('domeSlot') },
+    outcall: { on: f.has('outOn'), open: f.get('outOpen'), close: f.get('outClose') },
+    queue: { on: f.has('queueOn'), slotMin: f.get('queueSlot') } };
+  try { await adm('/api/admin/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('บันทึกแล้ว'); await load(); }
+  catch (er) { toast(er.message); }
+}
+
+const A = {
+  out: (v) => { const [id, a] = v.split(':'); const km = fareEdit[id]?.km; return act(`/api/admin/outcall/${id}/${a}`, km ? { km } : {}); },
+  dome: (v) => { const [id, a] = v.split(':'); if (a === 'cancelled' && !confirm('ยกเลิกคิวนี้?')) return; return act(`/api/admin/dome/${id}/${a}`); },
+  q: (v) => { const [no, a] = v.split(':'); return act(`/api/admin/queue/${no}/${a}`); },
+  next: () => act('/api/admin/call-next'),
+  msg: (v) => { sheet = { kind: 'b', id: v }; renderSheet(); },
+  msgq: (v) => { sheet = { kind: 'q', no: Number(v) }; renderSheet(); },
+  close: () => { sheet = null; renderSheet(); },
+  send: async (v) => { const [target, kind] = v.split('|'); sheet = null; renderSheet(); await act('/api/admin/send', { target, kind }); },
+  shared: () => { setTimeout(() => { sheet = null; renderSheet(); }, 80); },
+  print: () => window.print(),
+  logout: () => { PASS = ''; try { sessionStorage.removeItem('nuad_pass'); } catch {} rLogin(); },
+};
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-a]'); if (!el || el.disabled) return;
+  if (el.tagName === 'A' && el.dataset.a !== 'shared') e.preventDefault();
+  A[el.dataset.a]?.(el.dataset.v);
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sheet) { sheet = null; renderSheet(); } });
+
+PASS ? load() : rLogin();
+</script>
+</body>
+</html>

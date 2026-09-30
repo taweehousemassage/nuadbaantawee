@@ -1,0 +1,24 @@
+{
+  "size": { "width": 2500, "height": 1686 },
+  "selected": true,
+  "name": "เมนูพี่หนึ่ง",
+  "chatBarText": "เมนู",
+  "areas": [
+    {
+      "bounds": { "x": 0, "y": 0, "width": 1250, "height": 843 },
+      "action": { "type": "uri", "label": "จองนวด", "uri": "https://<ชื่อเว็บใหม่>.onrender.com" }
+    },
+    {
+      "bounds": { "x": 1250, "y": 0, "width": 1250, "height": 843 },
+      "action": { "type": "message", "label": "นัด/คิวของฉัน", "text": "ดูนัดของฉัน" }
+    },
+    {
+      "bounds": { "x": 0, "y": 843, "width": 1250, "height": 843 },
+      "action": { "type": "message", "label": "แจ้งโอน·สลิป", "text": "แจ้งโอน" }
+    },
+    {
+      "bounds": { "x": 1250, "y": 843, "width": 1250, "height": 843 },
+      "action": { "type": "message", "label": "ทักหาพี่หนึ่ง", "text": "สอบถาม" }
+    }
+  ]
+}

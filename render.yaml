@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: nuad-baantawee
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: OWNER_CODE
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: LINE_OA_ID
+        sync: false
+      - key: LINE_ADD_FRIEND_URL
+        sync: false
