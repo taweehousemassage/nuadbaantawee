@@ -16,6 +16,39 @@ const owner = () => store.data().settings.ownerUserId;
 const notifyOwner = (text) => (store.data().settings.notifyOwner && owner() ? line.push(owner(), text) : Promise.resolve(false));
 const find = (id) => store.data().bookings.find((b) => b.id === String(id || '').toUpperCase());
 
+// ---------------------------------------------------------------- ผูกไลน์ภาคบังคับ
+// ทุกการจองต้องมี lineUserId · ถ้ายังไม่ผูก จะกันคิวไว้ LINK_MIN นาทีแล้วยกเลิกอัตโนมัติ
+export const LINK_MIN = 15;
+const LINK_MS = LINK_MIN * 60_000;
+
+// ตรวจ ID token จาก LIFF กับเซิร์ฟเวอร์ LINE — ห้ามเชื่อ userId ที่หน้าเว็บส่งมาตรง ๆ
+async function uidFromIdToken(idToken) {
+  const cid = env('LINE_LOGIN_CHANNEL_ID');
+  if (!idToken || !cid) return '';
+  try {
+    const r = await fetch('https://api.line.me/oauth2/v2.1/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ id_token: String(idToken), client_id: cid }),
+    });
+    if (!r.ok) { console.error('LIFF verify', r.status, await r.text()); return ''; }
+    const j = await r.json();
+    return typeof j.sub === 'string' ? j.sub : '';
+  } catch (e) { console.error('LIFF verify:', e.message); return ''; }
+}
+
+// ยกเลิกคิวที่ยังไม่ผูกไลน์และหมดเวลากันคิวแล้ว
+function sweepUnlinked() {
+  if (!store.data()) return;
+  const now = Date.now(); let changed = false;
+  for (const b of store.data().bookings) {
+    if (b.lineUserId || !b.linkUntil || now <= b.linkUntil) continue;
+    if (b.kind === 'dome' ? b.status === 'booked' : b.status === 'requested') b.status = 'expired';
+    b.linkUntil = null; changed = true;
+  }
+  if (changed) store.save();
+}
+
 // ---------------------------------------------------------------- LINE webhook
 async function handleLineWebhook(req) {
   if (!store.data()) return;
@@ -50,7 +83,10 @@ async function handleEvent(ev) {
     if ((r = /นัดนวด\s*([A-Z0-9]{5})\b/i.exec(txt))) {
       const b = find(r[1]);
       if (!b) return line.reply(ev.replyToken, REPLY.notFound());
-      b.lineUserId = uid; store.save();
+      if (b.status === 'expired') return line.reply(ev.replyToken, `รหัส ${b.id} หมดเวลายืนยันแล้วค่ะ (ต้องผูกไลน์ภายใน ${LINK_MIN} นาที) รบกวนจองใหม่อีกครั้งนะคะ 🙏`);
+      const wasPending = !b.lineUserId && !!b.linkUntil;
+      b.lineUserId = uid; b.linkUntil = null; store.save();
+      if (wasPending) notifyOwner(b.kind === 'dome' ? OWNER.booking(b) : OWNER.outcall(s, b));
       return line.reply(ev.replyToken, bookingReply(s, b));
     }
     if ((r = /บัตรคิวนวด\s*(\d+)/.exec(txt))) {
@@ -108,7 +144,7 @@ async function decideOutcall(b, action, patch = {}) {
 // ---------------------------------------------------------------- ติดตั้ง
 export function mountNuad(app) {
   const ready = store.init();
-  app.use('/api', (req, res, next) => ready.then(() => next(), next));
+  app.use('/api', (req, res, next) => ready.then(() => { try { sweepUnlinked(); } catch {} next(); }, next));
   app.post('/api/line/webhook', (req, res) => {
     res.status(200).end();
     handleLineWebhook(req).catch((e) => console.error('webhook:', e.message));
@@ -135,7 +171,14 @@ export function mountNuad(app) {
   app.get('/admin', (req, res) => res.sendFile(path.join(PAGES, 'admin.html')));
 
   // ---------- ข้อมูลสาธารณะ
-  const lineInfo = () => ({ on: line.enabled() && line.canVerify(), oaId: env('LINE_OA_ID'), addFriend: env('LINE_ADD_FRIEND_URL') });
+  const lineInfo = () => ({
+    on: line.enabled() && line.canVerify(),
+    oaId: env('LINE_OA_ID'),
+    addFriend: env('LINE_ADD_FRIEND_URL'),
+    liffId: env('LINE_LIFF_ID'),                                   // มีค่า = บังคับผูกไลน์ตอนจอง
+    requireLink: !!(env('LINE_LIFF_ID') && env('LINE_LOGIN_CHANNEL_ID')),
+    linkMin: LINK_MIN,
+  });
   app.get('/api/public', (req, res) => {
     const s = S(), n = L.nowBKK();
     const days = Array.from({ length: 14 }, (_, i) => {
@@ -162,9 +205,10 @@ export function mountNuad(app) {
   });
 
   const pub = (b) => (b.kind === 'dome'
-    ? { id: b.id, kind: 'dome', date: b.date, time: b.time, status: b.status, linked: !!b.lineUserId }
+    ? { id: b.id, kind: 'dome', date: b.date, time: b.time, status: b.status, linked: !!b.lineUserId, linkUntil: b.linkUntil || null }
     : { id: b.id, kind: 'outcall', date: b.date, from: b.from, to: b.to, place: b.place, km: b.km, estimated: b.estimated,
-        travel: b.travel, teacherMin: b.teacherMin, status: b.status, linked: !!b.lineUserId, ownerNote: b.ownerNote || '' });
+        travel: b.travel, teacherMin: b.teacherMin, status: b.status, linked: !!b.lineUserId, linkUntil: b.linkUntil || null,
+        ownerNote: b.ownerNote || '' });
 
   const checkPerson = (body) => {
     const name = String(body?.name || '').trim().slice(0, 40);
@@ -175,7 +219,7 @@ export function mountNuad(app) {
   };
 
   // ---------- จองคิวโดม (ฟรี)
-  app.post('/api/dome/bookings', (req, res) => {
+  app.post('/api/dome/bookings', async (req, res) => {
     const { date, time } = req.body || {};
     const t = Number(time);
     const p = checkPerson(req.body);
@@ -184,14 +228,24 @@ export function mountNuad(app) {
     if (!L.domeSlots(date).some((x) => x.t === t && x.ok)) return res.status(409).json({ error: 'เวลานี้เพิ่งมีคนจองไป เลือกเวลาอื่นนะคะ' });
     const dup = store.data().bookings.find((b) => b.kind === 'dome' && b.phone === p.phone && b.date === date && b.status === 'booked');
     if (dup) return res.status(409).json({ error: `เบอร์นี้จองวันนี้ไว้แล้ว (รหัส ${dup.id})`, booking: pub(dup) });
-    const b = { id: L.newCode(), kind: 'dome', date, time: t, name: p.name, phone: p.phone, status: 'booked', createdAt: Date.now() };
+    const uid = await uidFromIdToken(req.body?.idToken);
+    if (!uid && lineInfo().requireLink) return res.status(401).json({ error: 'ต้องเข้าสู่ระบบด้วยไลน์ก่อนจองนะคะ', needLine: true });
+    const b = { id: L.newCode(), kind: 'dome', date, time: t, name: p.name, phone: p.phone, status: 'booked', createdAt: Date.now(),
+      lineUserId: uid || '', linkUntil: uid ? null : Date.now() + LINK_MS };
     store.data().bookings.push(b); store.save();
-    notifyOwner(OWNER.booking(b));
+    if (uid) { line.push(uid, TEMPLATES.domeConfirm.text(S(), b)).catch(() => {}); notifyOwner(OWNER.booking(b)); }
     res.json(pub(b));
   });
 
   // ---------- นวดนอกสถานที่
-  const validPoint = (o) => o && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng)) && Math.abs(o.lat) <= 90 && Math.abs(o.lng) <= 180;
+  const coord = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
+  const validPoint = (o) => {
+    if (!o) return false;
+    const la = coord(o.lat), ln = coord(o.lng);
+    if (!Number.isFinite(la) || !Number.isFinite(ln)) return false;
+    if (Math.abs(la) > 90 || Math.abs(ln) > 180) return false;
+    return !(la === 0 && ln === 0); // 0,0 = ยังไม่ได้ตั้งพิกัด ไม่ใช่กลางมหาสมุทรแอตแลนติก
+  };
 
   // คิดค่าเดินทางให้ดูก่อนกดส่งคำขอ
   app.post('/api/outcall/quote', async (req, res) => {
@@ -225,11 +279,14 @@ export function mountNuad(app) {
     if (validPoint(pt) && validPoint(s.origin)) {
       const d = await roadKm(s.origin, pt); km = d.km; estimated = d.estimated; travel = travelFare(km, s);
     }
+    const uid = await uidFromIdToken(req.body?.idToken);
+    if (!uid && lineInfo().requireLink) return res.status(401).json({ error: 'ต้องเข้าสู่ระบบด้วยไลน์ก่อนส่งคำขอนะคะ', needLine: true });
     const b = { id: L.newCode(), kind: 'outcall', date, from: f, to: t2, place: pt, km, estimated,
       travel: travel ?? 0, teacherMin: s.teacherMin, name: p.name, phone: p.phone,
-      note: String(note || '').trim().slice(0, 300), status: 'requested', createdAt: Date.now() };
+      note: String(note || '').trim().slice(0, 300), status: 'requested', createdAt: Date.now(),
+      lineUserId: uid || '', linkUntil: uid ? null : Date.now() + LINK_MS };
     store.data().bookings.push(b); store.save();
-    if (owner()) await line.push(owner(), OWNER.outcall(s, b));
+    if (uid && owner()) await line.push(owner(), OWNER.outcall(s, b));
     res.json(pub(b));
   });
 
