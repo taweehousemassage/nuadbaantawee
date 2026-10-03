@@ -95,7 +95,9 @@ function render() {
   h += `<h3 class="sec">🏛️ คิวโดมผู้สูงอายุ <small>${thDate(n.date)}</small></h3>`;
   h += domeToday.length ? `<ul class="list">${domeToday.map((b) => `<li class="item ${['cancelled', 'noshow'].includes(b.status) ? 'dim' : ''}"><span class="k">${toT(b.time)}</span>
       <div class="who"><b>${esc(b.name)} ${chip(b.status)} ${lineChip(b)}</b><small>รหัส ${b.id} · <a href="tel:${esc(b.phone)}">${esc(b.phone)}</a></small></div>
-      <div class="acts">${b.status === 'booked' ? `<button class="btn primary sm" data-a="dome" data-v="${b.id}:done">นวดเสร็จ</button>
+      <div class="acts">${['booked', 'slip'].includes(b.status) ? `<button class="btn primary sm" data-a="dome" data-v="${b.id}:paid">ยืนยันการโอน</button>
+        <button class="btn ghost sm" data-a="dome" data-v="${b.id}:cancelled">ยกเลิก</button>`
+        : b.status === 'paid' ? `<button class="btn primary sm" data-a="dome" data-v="${b.id}:done">นวดเสร็จ</button>
         <button class="btn ghost sm" data-a="dome" data-v="${b.id}:noshow">ไม่มา</button><button class="btn ghost sm" data-a="dome" data-v="${b.id}:cancelled">ยกเลิก</button>` : ''}</div></li>`).join('')}</ul>`
     : `<p class="hint">วันนี้ยังไม่มีคิวโดม</p>`;
   const domeNext = D.dome.filter((b) => b.date > n.date);
@@ -126,7 +128,10 @@ function render() {
       <div><label for="st-start">ค่ามิเตอร์เริ่มต้น</label><input id="st-start" name="taxiStart" type="number" min="0" value="${s.taxi?.start ?? 35}"></div>
       <div><label for="st-dopen">โดมเปิด</label><input id="st-dopen" name="domeOpen" type="time" value="${s.dome.open}"></div>
       <div><label for="st-dclose">โดมปิด</label><input id="st-dclose" name="domeClose" type="time" value="${s.dome.close}"></div>
-      <div><label for="st-dslot">โดม ครั้งละ (นาที)</label><input id="st-dslot" name="domeSlot" type="number" min="5" max="120" step="5" value="${s.dome.slotMin}"></div>
+      <div><label for="st-dslot">โดม ช่องเวลาห่างกัน (นาที)</label><input id="st-dslot" name="domeSlot" type="number" min="5" max="120" step="5" value="${s.dome.slotMin}"></div>
+      <div><label for="st-ddur">โดม นวดจริงนาน (นาที)</label><input id="st-ddur" name="domeDur" type="number" min="5" max="240" step="5" value="${s.dome.durationMin || 30}"></div>
+      <div><label for="st-dpay">โดม ค่าครูขั้นต่ำ (บาท)</label><input id="st-dpay" name="domePay" type="number" min="0" step="10" value="${s.dome.payMin ?? 100}"></div>
+      <div><label for="st-dhold">โดม กันคิวระหว่างรอโอน (นาที)</label><input id="st-dhold" name="domeHold" type="number" min="5" max="240" step="5" value="${s.dome.holdMin || 30}"></div>
       <div><label for="st-qslot">บัตรคิว ครั้งละ (นาที)</label><input id="st-qslot" name="queueSlot" type="number" min="15" max="240" step="15" value="${s.queue.slotMin}"></div>
       <div><label for="st-oopen">นอกสถานที่ เริ่ม</label><input id="st-oopen" name="outOpen" type="time" value="${s.outcall.open}"></div>
       <div><label for="st-oclose">นอกสถานที่ ถึง</label><input id="st-oclose" name="outClose" type="time" value="${s.outcall.close}"></div>
@@ -186,7 +191,8 @@ async function saveSettings(e) {
     originLabel: f.get('originLabel'), originLink: f.get('originLink'), teacherMin: f.get('teacherMin'), taxiStart: f.get('taxiStart'),
     roundTrip: f.has('roundTrip'), notifyOwner: f.has('notifyOwner'), autoRemind: f.has('autoRemind'),
     notices: String(f.get('notices') || '').split('\n').map((x) => x.trim()).filter(Boolean),
-    dome: { on: f.has('domeOn'), open: f.get('domeOpen'), close: f.get('domeClose'), slotMin: f.get('domeSlot') },
+    dome: { on: f.has('domeOn'), open: f.get('domeOpen'), close: f.get('domeClose'), slotMin: f.get('domeSlot'),
+      durationMin: f.get('domeDur'), payMin: f.get('domePay'), holdMin: f.get('domeHold') },
     outcall: { on: f.has('outOn'), open: f.get('outOpen'), close: f.get('outClose') },
     queue: { on: f.has('queueOn'), slotMin: f.get('queueSlot') } };
   try { await adm('/api/admin/settings', { method: 'PUT', body: JSON.stringify(body) }); toast('บันทึกแล้ว'); await load(); }

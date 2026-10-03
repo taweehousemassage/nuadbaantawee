@@ -21,7 +21,8 @@ export const TEMPLATES = {
   confirm: { label: 'ยืนยันการจอง', for: ['b', 'bt'], text: (s, x) => `ยืนยันนัดนวดแล้วค่ะ 🗓️ ${thDate(x.date)} เวลา ${toT(x.time)} น. รหัส ${x.id}${sig(s)}` },
   paid:    { label: 'ได้รับเงินแล้ว ขอบคุณค่ะ', for: ['b', 'bt', 'q'], text: (s, x) => `ได้รับยอดโอนเรียบร้อยแล้วค่ะ ขอบคุณมากนะคะ 🙏 ${x.id ? 'รหัส ' + x.id : 'บัตรคิวที่ ' + x.no}${sig(s)}` },
   remind:  { label: 'เตือนนัดพรุ่งนี้', for: ['bt'], text: (s, x) => `พรุ่งนี้มีนัดนวดนะคะ 🗓️ ${thDate(x.date)} เวลา ${toT(x.time)} น. ถ้าติดธุระทักในแชทนี้ได้เลยค่ะ${sig(s)}` },
-  domeConfirm: { label: 'ยืนยันคิวโดม', for: ['b', 'bt'], text: (s, x) => `ยืนยันคิวโดมผู้สูงอายุแล้วค่ะ 🗓️ ${thDate(x.date)} เวลา ${toT(x.time)} น. รหัส ${x.id}\nคิวนี้ไม่มีค่าใช้จ่าย มาตามเวลาได้เลยนะคะ${sig(s)}` },
+  domeConfirm: { label: 'รับจองคิวโดม (รอโอน)', for: ['b', 'bt'], text: (s, x) => `รับจองคิวโดมผู้สูงอายุแล้วค่ะ 🗓️ ${thDate(x.date)} เวลา ${toT(x.time)} น. รหัส ${x.id}\nโอนค่าครูขั้นต่ำ ${baht(x.payMin ?? s.dome?.payMin ?? 0)} บาท (มากกว่านี้ได้ตามกำลังศรัทธา) แล้วส่งรูปสลิปในแชทนี้นะคะ 🧾\nกันคิวไว้ให้ ${Math.max(5, Number(s.dome?.holdMin) || 30)} นาที ถ้ายังไม่ได้โอน คิวจะถูกปล่อยให้คนอื่นค่ะ${sig(s)}` },
+  domePaid: { label: 'ยืนยันคิวโดมเรียบร้อย', for: ['b', 'bt'], text: (s, x) => `ยืนยันคิวโดมเรียบร้อยแล้วค่ะ ✅ 🗓️ ${thDate(x.date)} เวลา ${toT(x.time)} น. รหัส ${x.id}\nมาก่อนเวลาสัก 5 นาทีนะคะ แล้วพบกันค่ะ${sig(s)}` },
   outAccepted: { label: 'รับงานนอกสถานที่ + ยอดโอน', for: ['b', 'bt'], text: (s, x) => `${s.therapist || 'พี่หนึ่ง'}รับงานนอกสถานที่แล้วค่ะ 🚗\n🗓️ ${thDate(x.date)} ${timeRange(x)}\n📍 ${x.place?.text || '-'}\n\n${fareLines(s, x)}\n\nโอนแล้วส่งรูปสลิปในแชทนี้ได้เลยนะคะ 🧾 รหัส ${x.id}${sig(s)}` },
   outNegotiate: { label: 'ขอคุยเรื่องเวลา/ค่าเดินทาง', for: ['b', 'bt'], text: (s, x) => `ขอคุยรายละเอียดงานวันที่ ${thDate(x.date)} สักนิดนะคะ 🙏 (รหัส ${x.id})\nระยะทางที่ระบบคำนวณได้ ${x.km} กม. ค่าเดินทาง ${baht(x.travel)} บาท ถ้าเวลาหรือเส้นทางปรับได้ พิมพ์คุยในแชทนี้ได้เลยค่ะ${sig(s)}` },
   outDeclined: { label: 'รับงานวันนั้นไม่ได้', for: ['b', 'bt'], text: (s, x) => `ขออภัยนะคะ 🙏 วันที่ ${thDate(x.date)} ${timeRange(x)} ${s.therapist || 'พี่หนึ่ง'}ติดคิวอื่นอยู่ค่ะ ถ้าเลื่อนวันได้ ทักบอกวันที่สะดวกในแชทนี้ได้เลยนะคะ (รหัส ${x.id})${sig(s)}` },
@@ -55,7 +56,7 @@ export const REPLY = {
 
 // แจ้งพี่หนึ่ง (push — นับโควตา ปิดได้ในหน้าตั้งค่า)
 export const OWNER = {
-  booking: (b) => `💆 คิวโดมใหม่ ${b.id}\n${b.name} ${b.phone}\n${thDate(b.date)} ${toT(b.time)} น.`,
+  booking: (b) => `💆 คิวโดมใหม่ ${b.id}\n${b.name} ${b.phone}\n${thDate(b.date)} ${toT(b.time)} น. · รอโอน ${baht(b.payMin || 0)} บาท`,
   outcall: (s, b) => `🚗 งานนอกสถานที่ใหม่ ${b.id}\n${b.name} ${b.phone}\n🗓️ ${thDate(b.date)} ${timeRange(b)}\n📍 ${b.place?.text || '-'}\n${fareLines(s, b)}\n${b.note ? '📝 ' + b.note + '\n' : ''}\nตอบกลับ: รับงาน ${b.id} · เจรจา ${b.id} · ไม่รับ ${b.id}`,
   slip: (x) => `🧾 สลิปใหม่ ${x.id ? 'รหัส ' + x.id : 'บัตรคิว ' + x.no} · ${x.name} — เปิดหน้าพี่หนึ่งเพื่อกดรับเงิน`,
 };

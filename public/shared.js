@@ -45,7 +45,9 @@ export function drawQR(el, text, box = 280) {
 
 // ---------- LINE ----------
 export const shareHref = (text) => 'https://line.me/R/msg/text/?' + encodeURIComponent(text);
-export const oaChatHref = (oaId, text) => `https://line.me/R/oaMessage/${encodeURIComponent(oaId)}/?${encodeURIComponent(text)}`;
+export const oaTag = (oaId) => { const s = String(oaId || '').trim(); return s ? (s.startsWith('@') ? s : '@' + s) : ''; };
+export const oaChatHref = (oaId, text) => `https://line.me/R/oaMessage/${encodeURIComponent(oaTag(oaId))}/?${encodeURIComponent(text)}`;
+export const addFriendHref = (oaId) => (oaTag(oaId) ? 'https://line.me/R/ti/p/' + encodeURIComponent(oaTag(oaId)) : '');
 
 export const LINE_SVG = '<svg viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M12 3.5c-5.24 0-9.5 3.44-9.5 7.68 0 3.8 3.38 6.98 7.94 7.58.31.06.73.2.84.46.1.24.06.6.03.84l-.13.82c-.04.24-.19.95.83.52 1.02-.43 5.5-3.24 7.5-5.55 1.38-1.52 2.04-3.07 2.04-4.79C21.5 6.94 17.24 3.5 12 3.5z"/></svg>';
 

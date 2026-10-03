@@ -23,10 +23,11 @@
 <main class="wrap wide" id="main"></main>
 <footer class="bbfoot" id="foot"></footer>
 <div id="toast" role="status" aria-live="polite"></div>
+<script src="https://static.line.me/liff/edge/2/sdk.js"></script>
 <script src="/vendor/qrcode-generator.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module">
-import { $, esc, thn, DAYN, api, toast, ppPayload, drawQR, oaChatHref, LINE_SVG, copyText } from '/shared.js';
+import { $, esc, thn, DAYN, api, toast, ppPayload, drawQR, oaChatHref, addFriendHref, LINE_SVG, copyText } from '/shared.js';
 import { toT, thDate, baht } from '/messages.js';
 
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
@@ -42,20 +43,49 @@ const U = {
   oName: store.get('nm') || '', oPhone: store.get('ph') || '', oOk: false, oErr: '', oBooking: null, oAmt: '',
   // อื่น ๆ
   ticket: null, wname: store.get('nm') || '', wErr: '', myPhone: store.get('ph') || '', myList: null, busy: '',
+  // ไลน์ (LIFF)
+  idToken: '', lineName: '', lineReady: false, dAmt: '',
 };
 const hasOA = () => P.line.on && P.line.oaId;
-const addFriend = () => P.line.addFriend || (P.line.oaId ? 'https://line.me/R/ti/p/' + encodeURIComponent(P.line.oaId) : '');
+const needLine = () => !!P.line.requireLink;                 // บังคับผูกไลน์ทุกการจอง
+const lineOK = () => !needLine() || !!U.idToken;
+async function lineLogin() {
+  if (!window.liff || !P.line.liffId) return toast('ยังเปิดการเข้าสู่ระบบไลน์ไม่ได้ ลองใหม่อีกครั้งนะคะ');
+  try { liff.login({ redirectUri: location.href }); } catch (e) { toast('เข้าสู่ระบบไลน์ไม่สำเร็จ: ' + e.message); }
+}
+function lineGate(what) {
+  if (lineOK()) return '';
+  return `<div class="note info linegate"><b>ต้องผูกไลน์ก่อน${esc(what)}</b>
+    <span>${esc(P.settings.therapist)}จะส่งคำยืนยันและอัปเดตทั้งหมดทางไลน์ กดปุ่มด้านล่างครั้งเดียวพอค่ะ</span>
+    <button class="btn line full" data-a="line-login">${LINE_SVG} เข้าสู่ระบบด้วยไลน์</button></div>`;
+}
+const addFriend = () => P.line.addFriend || addFriendHref(P.line.oaId);
+
+async function initLiff() {
+  if (!P.line.liffId || !window.liff) return;
+  try {
+    await liff.init({ liffId: P.line.liffId });
+    U.lineReady = true;
+    if (liff.isLoggedIn()) {
+      U.idToken = liff.getIDToken() || '';
+      try { U.lineName = (await liff.getProfile()).displayName || ''; } catch {}
+      if (U.lineName && !U.dName) U.dName = U.lineName;
+      if (U.lineName && !U.oName) U.oName = U.lineName;
+    }
+  } catch (e) { console.error('liff:', e.message); }
+}
 
 async function start() {
   P = await api('/api/public');
   document.title = P.settings.shopName;
+  await initLiff();
   U.dDate = P.days.find((d) => d.dome)?.date || P.today;
   U.oDate = P.days.find((d) => d.outcall)?.date || P.today;
   U.oFrom = toMinOf(P.settings.outcall.open); U.oTo = toMinOf(P.settings.outcall.close);
   const ids = store.get('mybk') || {};
   if (ids.dome) U.dBooking = await api('/api/bookings/' + ids.dome).catch(() => null);
   if (ids.out) U.oBooking = await api('/api/bookings/' + ids.out).catch(() => null);
-  if (U.dBooking && (U.dBooking.date < P.today || U.dBooking.status !== 'booked')) U.dBooking = null;
+  if (U.dBooking && (U.dBooking.date < P.today || !['booked', 'slip', 'paid', 'expired'].includes(U.dBooking.status))) U.dBooking = null;
   if (U.oBooking && (U.oBooking.date < P.today || ['declined', 'cancelled', 'done'].includes(U.oBooking.status))) U.oBooking = null;
   const t = store.get('ticket');
   if (t && t.date === P.today) U.ticket = await api('/api/queue/' + t.no).catch(() => null);
@@ -70,6 +100,7 @@ async function poll() {
   if (document.hidden || document.activeElement?.matches('input,textarea')) return;
   const pub = await api('/api/public').catch(() => null); if (pub) P = pub;
   if (U.oBooking) { const b = await api('/api/bookings/' + U.oBooking.id).catch(() => null); if (b) U.oBooking = b; }
+  if (U.dBooking) { const b = await api('/api/bookings/' + U.dBooking.id).catch(() => null); if (b) U.dBooking = b; }
   if (U.ticket && ['waiting', 'serving'].includes(U.ticket.status)) { const t = await api('/api/queue/' + U.ticket.no).catch(() => null); if (t) U.ticket = t; }
   render();
 }
@@ -80,7 +111,7 @@ function head() {
   $('#mast').innerHTML = `<h1 class="mast-title"><span class="orn" aria-hidden="true"></span>${esc(s.shopName)}<span class="orn" aria-hidden="true"></span></h1>
     <ul class="notices">${(s.notices || []).map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`;
   $('#foot').innerHTML = `${addFriend() ? `<a class="line-pill" href="${esc(addFriend())}" target="_blank" rel="noopener">${LINE_SVG}เพิ่มเพื่อน LINE ${esc(s.therapist)}</a><span>แจ้งคิว ส่งสลิป และทักถามได้ในแชทนี้</span>` : ''}
-    <span><a href="/privacy.html">ความเป็นส่วนตัว</a> · <a href="/admin" rel="nofollow">สำหรับ${esc(s.therapist)}</a></span>`;
+    <span><a href="/privacy.html">ความเป็นส่วนตัว</a> · <a href="/terms.html">ข้อกำหนดการใช้บริการ</a> · <a href="/admin" rel="nofollow">สำหรับ${esc(s.therapist)}</a></span>`;
 }
 
 function render() {
@@ -91,7 +122,7 @@ function render() {
   if (U.view === 'home' && !U.oBooking && P.settings.outcall.on) initMap();
 }
 const rHome = () => `<div class="two">
-    <section class="pane"><h2 class="pane-title">🏛️ คิวโดมผู้สูงอายุ<small>จ.–ศ. ${P.settings.dome.open}–${P.settings.dome.close} น. · ครั้งละ ${P.settings.dome.slotMin} นาที · ไม่มีค่าใช้จ่าย</small></h2>${U.dBooking ? rDomeDone() : rDome()}</section>
+    <section class="pane"><h2 class="pane-title">🏛️ คิวโดมผู้สูงอายุ<small>จ.–ศ. ${P.settings.dome.open}–${P.settings.dome.close} น. · ครั้งละ ${P.settings.dome.durationMin || 30} นาที · ค่าครูขั้นต่ำ ${baht(P.settings.dome.payMin || 0)} ฿</small></h2>${U.dBooking ? rDomeDone() : rDome()}</section>
     <section class="pane"><h2 class="pane-title">🚗 นวดนอกสถานที่<small>จ.–ศ. ${P.settings.outcall.open}–${P.settings.outcall.close} น. · ค่าเดินทางคิดตามมิเตอร์แท็กซี่ ไป-กลับ</small></h2>${U.oBooking ? rOutDone() : rOut()}</section>
   </div>
   <p class="center-link"><button class="btn ghost sm" data-a="view" data-v="my">ดูนัดของฉัน</button></p>`;
@@ -109,19 +140,45 @@ function rDome() {
       <div class="sum"><span>${thDate(U.dDate)}</span><b>${toT(U.dTime)} น.</b></div>
       <label for="d-name">ชื่อ</label><input id="d-name" data-f="dName" value="${esc(U.dName)}" maxlength="40" placeholder="ชื่อผู้มานวด" autocomplete="name">
       <label for="d-phone">เบอร์โทร</label><input id="d-phone" data-f="dPhone" value="${esc(U.dPhone)}" inputmode="tel" maxlength="12" placeholder="08x-xxx-xxxx" autocomplete="tel">
-      <label class="check"><input type="checkbox" data-f="dOk" ${U.dOk ? 'checked' : ''}>ยินยอมให้เก็บชื่อและเบอร์ไว้ใช้นัดหมาย (<a href="/privacy.html" target="_blank">อ่าน</a>)</label>
+      <label class="check"><input type="checkbox" data-f="dOk" ${U.dOk ? 'checked' : ''}>ยอมรับ<a href="/terms.html" target="_blank">ข้อกำหนดการใช้บริการ</a> และยินยอมให้เก็บชื่อกับเบอร์ไว้ใช้นัดหมายตาม<a href="/privacy.html" target="_blank">นโยบายความเป็นส่วนตัว</a></label>
       ${U.dErr ? `<p class="err" role="alert">${esc(U.dErr)}</p>` : ''}
-      <button class="btn primary big" data-a="d-book" ${U.busy === 'dome' ? 'disabled' : ''}>${U.busy === 'dome' ? 'กำลังจอง…' : 'ยืนยันจองคิวโดม'}</button></div>`;
+      ${lineGate('จองคิว')}
+      <button class="btn primary big" data-a="d-book" ${U.busy === 'dome' ? 'disabled' : ''}>${U.busy === 'dome' ? 'กำลังจอง…' : lineOK() ? 'ยืนยันจองคิวโดม' : 'เข้าสู่ระบบด้วยไลน์เพื่อจอง'}</button></div>`;
   return h;
 }
+// สถานะการผูกไลน์ของใบจอง
+function linkState(b) {
+  if (b.status === 'expired') return `<p class="note bad">คิวนี้หมดเวลายืนยันแล้ว (ไม่ได้ผูกไลน์ภายใน ${P.line.linkMin || 15} นาที) รบกวนจองใหม่นะคะ</p>`;
+  if (b.linked) return `<p class="note ok">ผูกไลน์แล้ว ✓ จะแจ้งทุกอัปเดตในแชทไลน์นะคะ</p>`;
+  if (!b.linkUntil) return '';
+  const left = Math.max(0, Math.ceil((b.linkUntil - Date.now()) / 60000));
+  return `<p class="note warn">ยังไม่ได้ผูกไลน์ — กันคิวไว้อีก <b>${left} นาที</b> ถ้าไม่ผูกจะถูกยกเลิกอัตโนมัติค่ะ</p>`;
+}
+
 function rDomeDone() {
-  const b = U.dBooking;
-  return `<div class="receipt"><div class="r-top"><span>รหัสคิวโดม</span><b>${b.id}</b></div>
-    <div class="r-row"><span>${thDate(b.date)}</span><b>${toT(b.time)} น.</b></div>
-    <div class="r-row"><span>ไม่มีค่าใช้จ่าย</span><span class="chip c-paid">จองแล้ว</span></div></div>
-    <p class="hint">มาก่อนเวลาสัก 5 นาทีนะคะ ถ้ามาไม่ได้ ทักบอกในไลน์ได้เลย</p>
-    ${hasOA() ? `<a class="btn line full" href="${oaChatHref(P.line.oaId, 'นัดนวด ' + b.id)}" target="_blank" rel="noopener">${LINE_SVG} ${b.linked ? 'เปิดแชท' : 'ผูกคิวนี้กับไลน์ เพื่อรับการแจ้งเตือน'}</a>` : ''}
-    <button class="btn ghost" data-a="d-reset">จองคิวใหม่</button>`;
+  const b = U.dBooking, s = P.settings;
+  const st = { booked: ['รอโอน', 'c-hold'], slip: ['ส่งสลิปแล้ว รอยืนยัน', 'c-slip'], paid: ['ยืนยันแล้ว', 'c-paid'],
+    done: ['นวดเสร็จ', 'c-done'], expired: ['หมดเวลา', 'c-no'] }[b.status] || ['-', 'c-done'];
+  const pay = Number(b.payMin ?? s.dome.payMin ?? 0);
+  const dur = Number(b.durationMin || s.dome.durationMin || 30);
+  let h = `<div class="receipt"><div class="r-top"><span>รหัสคิวโดม</span><b>${b.id}</b></div>
+    <div class="r-row"><span>${thDate(b.date)}</span><b>${toT(b.time)} น. · ${dur} นาที</b></div>
+    <div class="r-row"><span>ค่าครูขั้นต่ำ ${baht(pay)} ฿</span><span class="chip ${st[1]}">${st[0]}</span></div></div>`;
+  h += linkState(b);
+  if (b.status === 'booked') {
+    const left = b.holdUntil ? Math.max(0, Math.ceil((b.holdUntil - Date.now()) / 60000)) : null;
+    h += `<p class="note warn">โอนแล้วส่งรูปสลิปในไลน์เพื่อยืนยันคิวนะคะ${left != null ? ` · กันคิวไว้อีก <b>${left} นาที</b>` : ''}</p>`;
+    h += payBox(pay, 'dAmt');
+    h += hasOA()
+      ? `<a class="btn line full big" href="${oaChatHref(P.line.oaId, 'นัดนวด ' + b.id)}" target="_blank" rel="noopener">${LINE_SVG} ส่งสลิปทางไลน์</a>
+         <p class="hint">กดแล้วส่งข้อความในแชท จากนั้นแนบรูปสลิปต่อได้เลย ระบบจะจับคู่ให้เอง</p>`
+      : `<p class="hint">โอนแล้วส่งสลิปให้${esc(s.therapist)}ทางไลน์ได้เลยค่ะ</p>`;
+  }
+  if (b.status === 'slip') h += `<p class="note info">ได้รับสลิปแล้ว รอ${esc(s.therapist)}กดยืนยันสักครู่นะคะ 🧾</p>`;
+  if (b.status === 'paid') h += `<p class="note ok">ยืนยันคิวเรียบร้อยแล้วค่ะ ✅ มาก่อนเวลาสัก 5 นาที ถ้ามาไม่ได้ทักบอกในไลน์ได้เลย</p>`;
+  if (b.status === 'expired') h += `<p class="note bad">คิวนี้หมดเวลากันคิวแล้ว รบกวนจองใหม่อีกครั้งนะคะ</p>`;
+  if (hasOA() && b.status !== 'booked') h += `<a class="btn line full" href="${oaChatHref(P.line.oaId, 'นัดนวด ' + b.id)}" target="_blank" rel="noopener">${LINE_SVG} เปิดแชท</a>`;
+  return h + `<button class="btn ghost" data-a="d-reset">จองคิวใหม่</button>`;
 }
 
 // ---------------------------------------------------------------- นอกสถานที่
@@ -153,9 +210,10 @@ function rOut() {
     <input id="o-note" data-f="oNote" value="${esc(U.oNote)}" maxlength="300" placeholder="เช่น ปวดหลังล่าง ผู้สูงอายุ 80 ปี">
     <label for="o-name">ชื่อ</label><input id="o-name" data-f="oName" value="${esc(U.oName)}" maxlength="40" autocomplete="name">
     <label for="o-phone">เบอร์โทร</label><input id="o-phone" data-f="oPhone" value="${esc(U.oPhone)}" inputmode="tel" maxlength="12" autocomplete="tel">
-    <label class="check"><input type="checkbox" data-f="oOk" ${U.oOk ? 'checked' : ''}>ยินยอมให้เก็บชื่อ เบอร์ และตำแหน่งไว้ใช้นัดหมาย</label>
+    <label class="check"><input type="checkbox" data-f="oOk" ${U.oOk ? 'checked' : ''}>ยอมรับ<a href="/terms.html" target="_blank">ข้อกำหนดการใช้บริการ</a> และยินยอมให้เก็บชื่อ เบอร์ และตำแหน่งไว้ใช้นัดหมายตาม<a href="/privacy.html" target="_blank">นโยบายความเป็นส่วนตัว</a></label>
     ${U.oErr ? `<p class="err" role="alert">${esc(U.oErr)}</p>` : ''}
-    <button class="btn primary big" data-a="o-send" ${U.busy === 'out' ? 'disabled' : ''}>${U.busy === 'out' ? 'กำลังส่ง…' : `ส่งคำขอให้${esc(s.therapist)}`}</button>
+    ${lineGate('ส่งคำขอ')}
+    <button class="btn primary big" data-a="o-send" ${U.busy === 'out' ? 'disabled' : ''}>${U.busy === 'out' ? 'กำลังส่ง…' : lineOK() ? `ส่งคำขอให้${esc(s.therapist)}` : 'เข้าสู่ระบบด้วยไลน์เพื่อส่งคำขอ'}</button>
     <p class="hint">${esc(s.therapist)}จะกดรับงานหรือขอคุยเพิ่มทางไลน์ แล้วค่อยโอนค่าเดินทาง</p>
   </div>`;
 }
@@ -172,7 +230,8 @@ function rOutDone() {
   let h = `<div class="receipt"><div class="r-top"><span>รหัสงาน</span><b>${b.id}</b></div>
     <div class="r-row"><span>${thDate(b.date)}</span><b>${toT(b.from)}–${toT(b.to)} น.</b></div>
     <div class="r-row"><span>${esc(b.place?.text || '')}</span><span class="chip ${st[1]}">${st[0]}</span></div></div>`;
-  if (b.status === 'requested') h += `<p class="note info">ส่งคำขอให้${esc(s.therapist)}แล้ว 🙏 รอกดรับงานสักครู่นะคะ${hasOA() ? ' ถ้าผูกไลน์ไว้จะแจ้งเตือนทันทีที่มีคำตอบ' : ''}</p>`;
+  h += linkState(b);
+  if (b.status === 'requested') h += `<p class="note info">ส่งคำขอให้${esc(s.therapist)}แล้ว 🙏 รอกดรับงานสักครู่นะคะ${hasOA() ? ' จะแจ้งเตือนทางไลน์ทันทีที่มีคำตอบ' : ''}</p>`;
   if (b.status === 'negotiate') h += `<p class="note info">${esc(s.therapist)}ขอคุยรายละเอียดเพิ่มเติมในไลน์นะคะ</p>`;
   if (b.status === 'declined') h += `<p class="note bad">วันนี้${esc(s.therapist)}ติดคิวอื่นค่ะ ลองเลือกวันใหม่ได้เลย</p>`;
   if (['accepted', 'slip'].includes(b.status)) {
@@ -187,14 +246,14 @@ function rOutDone() {
   if (b.status === 'paid') h += `<p class="note ok">ยืนยันการโอนแล้ว แล้วพบกัน${thDate(b.date)} ${toT(b.from)}–${toT(b.to)} น. ค่ะ</p>`;
   return h + `<button class="btn ghost" data-a="o-reset">ขอนัดใหม่</button>`;
 }
-function payBox(total) {
-  const s = P.settings, amt = U.oAmt || String(total);
+function payBox(total, field = 'oAmt') {
+  const s = P.settings, amt = U[field] || String(total);
   if (!s.pp) return `<p class="note info">ยังไม่ได้ตั้งเลขพร้อมเพย์ ทักถามในไลน์ได้เลยค่ะ</p>`;
   return `<div class="pay"><div class="pay-h">สแกนจ่าย · พร้อมเพย์</div>
     <div class="qr" data-qr data-amt="${esc(amt)}"></div>
     <div class="copy-row"><span class="pay-to">${esc(s.therapist)}</span><code>${esc(s.pp)}</code><button class="btn ghost sm" data-a="copy" data-v="${esc(String(s.pp).replace(/\D/g, ''))}">คัดลอกเลข</button></div>
-    <label class="hint" for="o-amt">ยอดโอน (ขั้นต่ำ ${baht(total)} ฿ ใส่มากกว่านี้ได้)</label>
-    <div class="amt"><input id="o-amt" data-f="oAmt" inputmode="decimal" value="${esc(amt)}"><span>บาท</span></div>
+    <label class="hint" for="pay-${field}">ยอดโอน (ขั้นต่ำ ${baht(total)} ฿ ใส่มากกว่านี้ได้ตามกำลังศรัทธา)</label>
+    <div class="amt"><input id="pay-${field}" data-f="${field}" inputmode="decimal" value="${esc(amt)}"><span>บาท</span></div>
     <p class="tip">จ่ายจากมือถือเครื่องนี้? แคปหน้าจอ QR แล้วเปิดแอปธนาคาร เลือก <b>สแกนจากรูป</b></p></div>`;
 }
 const slipBtn = (b) => (hasOA()
@@ -257,10 +316,12 @@ const A = {
   view: (v) => { U.view = v; scrollTo({ top: 0, behavior: 'smooth' }); },
   'd-date': async (v) => { U.dDate = v; U.dTime = null; await loadDomeSlots(); },
   'd-time': (v) => { U.dTime = Number(v); U.dErr = ''; },
+  'line-login': () => lineLogin(),
   'd-book': async () => {
+    if (!lineOK()) return lineLogin();
     U.busy = 'dome'; render();
     try {
-      const b = await api('/api/dome/bookings', { method: 'POST', body: JSON.stringify({ date: U.dDate, time: U.dTime, name: U.dName, phone: U.dPhone, consent: U.dOk }) });
+      const b = await api('/api/dome/bookings', { method: 'POST', body: JSON.stringify({ date: U.dDate, time: U.dTime, name: U.dName, phone: U.dPhone, consent: U.dOk, idToken: U.idToken }) });
       U.dBooking = b; U.dErr = ''; remember(b, 'dome'); store.set('nm', U.dName); store.set('ph', U.dPhone); toast('จองคิวโดมเรียบร้อยค่ะ');
     } catch (e) { U.dErr = e.message; if (/จองไป/.test(e.message)) await loadDomeSlots(); }
     U.busy = '';
@@ -275,10 +336,11 @@ const A = {
       () => toast('ขอตำแหน่งไม่สำเร็จ แตะบนแผนที่แทนได้ค่ะ'));
   },
   'o-send': async () => {
+    if (!lineOK()) return lineLogin();
     U.busy = 'out'; render();
     try {
       const b = await api('/api/outcall/requests', { method: 'POST', body: JSON.stringify({
-        date: U.oDate, from: U.oFrom, to: U.oTo, note: U.oNote, name: U.oName, phone: U.oPhone, consent: U.oOk,
+        date: U.oDate, from: U.oFrom, to: U.oTo, note: U.oNote, name: U.oName, phone: U.oPhone, consent: U.oOk, idToken: U.idToken,
         place: { text: U.oText, lat: U.oPt?.lat, lng: U.oPt?.lng } }) });
       U.oBooking = b; U.oErr = ''; remember(b, 'out'); store.set('nm', U.oName); store.set('ph', U.oPhone);
       toast('ส่งคำขอให้' + P.settings.therapist + 'แล้วค่ะ');
@@ -316,7 +378,7 @@ document.addEventListener('submit', async (e) => {
 document.addEventListener('input', (e) => {
   const f = e.target.dataset.f; if (!f) return;
   U[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-  if (f === 'oAmt') { const qr = e.target.closest('.pay').querySelector('[data-qr]'); qr.dataset.amt = U.oAmt; drawQR(qr, ppPayload(P.settings.pp, U.oAmt)); }
+  if (f === 'oAmt' || f === 'dAmt') { const qr = e.target.closest('.pay').querySelector('[data-qr]'); qr.dataset.amt = U[f]; drawQR(qr, ppPayload(P.settings.pp, U[f])); }
 });
 document.addEventListener('change', (e) => {
   const f = e.target.dataset.f; if (f !== 'oFrom' && f !== 'oTo') return;
