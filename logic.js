@@ -15,7 +15,7 @@ export function addDays(date, n) { const d = new Date(date + 'T00:00:00Z'); d.se
 export const weekday = (date) => new Date(date + 'T00:00:00Z').getUTCDay();
 const S = () => db.data().settings;
 
-export const DOME_ACTIVE = ['booked', 'done'];
+export const DOME_ACTIVE = ['booked', 'slip', 'paid', 'done'];
 export const OUTCALL_ACTIVE = ['requested', 'accepted', 'negotiate', 'slip', 'paid', 'done'];
 export const isActive = (b) => (b.kind === 'dome' ? DOME_ACTIVE : OUTCALL_ACTIVE).includes(b.status);
 
@@ -23,14 +23,22 @@ export const domeOpenOn = (date) => { const d = S().dome; return !!d.on && d.day
 export const outcallOpenOn = (date) => { const o = S().outcall; return !!o.on && o.days.includes(weekday(date)); };
 
 // ช่องเวลาโดม (ฟรี จองแล้วมาเลย) — คืน [{t, ok}]
+export const domeDur = () => { const d = S().dome; return Math.max(5, Number(d.durationMin) || Number(d.slotMin) || 30); };
+
 export function domeSlots(date) {
   const d = S().dome, now = nowBKK(), out = [];
   if (!domeOpenOn(date) || date < now.date) return out;
   const step = Math.max(5, Number(d.slotMin) || 15), seats = Math.max(1, Number(d.seats) || 1);
+  const dur = domeDur();
   const taken = db.data().bookings.filter((b) => b.kind === 'dome' && b.date === date && isActive(b));
-  for (let t = toMin(d.open); t + step <= toMin(d.close); t += step) {
+  for (let t = toMin(d.open); t + dur <= toMin(d.close); t += step) {
     if (date === now.date && t < now.min) continue;
-    out.push({ t, ok: taken.filter((b) => b.time === t).length < seats });
+    // คิวที่จองไว้กินเวลา dur นาที — ช่องไหนทับกันถือว่าเต็ม (จอง 9:30 → 9:45 หายไปด้วย)
+    const busy = taken.filter((b) => {
+      const bs = Number(b.time), be = bs + (Number(b.durationMin) || dur);
+      return bs < t + dur && t < be;
+    }).length;
+    out.push({ t, ok: busy < seats });
   }
   return out;
 }

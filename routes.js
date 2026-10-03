@@ -42,9 +42,14 @@ function sweepUnlinked() {
   if (!store.data()) return;
   const now = Date.now(); let changed = false;
   for (const b of store.data().bookings) {
-    if (b.lineUserId || !b.linkUntil || now <= b.linkUntil) continue;
-    if (b.kind === 'dome' ? b.status === 'booked' : b.status === 'requested') b.status = 'expired';
-    b.linkUntil = null; changed = true;
+    if (!b.lineUserId && b.linkUntil && now > b.linkUntil) {
+      if (b.kind === 'dome' ? b.status === 'booked' : b.status === 'requested') b.status = 'expired';
+      b.linkUntil = null; changed = true;
+    }
+    // คิวโดมที่จองแล้วแต่ยังไม่โอนภายในเวลากันคิว → ปล่อยช่องคืน
+    if (b.kind === 'dome' && b.status === 'booked' && b.holdUntil && now > b.holdUntil) {
+      b.status = 'expired'; b.holdUntil = null; changed = true;
+    }
   }
   if (changed) store.save();
 }
@@ -103,10 +108,11 @@ async function handleEvent(ev) {
 
   if (m.type === 'image') {
     // สลิป = งานนอกสถานที่ที่รับงานแล้วและยังไม่จ่าย
-    const b = d.bookings.filter((x) => x.kind === 'outcall' && x.lineUserId === uid && ['accepted', 'negotiate'].includes(x.status))
+    const b = d.bookings.filter((x) => x.lineUserId === uid
+        && (x.kind === 'outcall' ? ['accepted', 'negotiate'].includes(x.status) : x.status === 'booked'))
       .sort((a, z) => z.createdAt - a.createdAt)[0];
     if (b) {
-      b.status = 'slip'; b.slipAt = Date.now(); store.save();
+      b.status = 'slip'; b.slipAt = Date.now(); b.holdUntil = null; store.save();
       await line.reply(ev.replyToken, REPLY.slip(s, b));
       return notifyOwner(OWNER.slip(b));
     }
@@ -205,7 +211,9 @@ export function mountNuad(app) {
   });
 
   const pub = (b) => (b.kind === 'dome'
-    ? { id: b.id, kind: 'dome', date: b.date, time: b.time, status: b.status, linked: !!b.lineUserId, linkUntil: b.linkUntil || null }
+    ? { id: b.id, kind: 'dome', date: b.date, time: b.time, durationMin: b.durationMin || L.domeDur(), status: b.status,
+        payMin: b.payMin ?? S().dome.payMin ?? 0, holdUntil: b.holdUntil || null,
+        linked: !!b.lineUserId, linkUntil: b.linkUntil || null }
     : { id: b.id, kind: 'outcall', date: b.date, from: b.from, to: b.to, place: b.place, km: b.km, estimated: b.estimated,
         travel: b.travel, teacherMin: b.teacherMin, status: b.status, linked: !!b.lineUserId, linkUntil: b.linkUntil || null,
         ownerNote: b.ownerNote || '' });
@@ -230,7 +238,10 @@ export function mountNuad(app) {
     if (dup) return res.status(409).json({ error: `เบอร์นี้จองวันนี้ไว้แล้ว (รหัส ${dup.id})`, booking: pub(dup) });
     const uid = await uidFromIdToken(req.body?.idToken);
     if (!uid && lineInfo().requireLink) return res.status(401).json({ error: 'ต้องเข้าสู่ระบบด้วยไลน์ก่อนจองนะคะ', needLine: true });
+    const sd = S().dome;
+    const holdMs = Math.max(5, Number(sd.holdMin) || 30) * 60_000;
     const b = { id: L.newCode(), kind: 'dome', date, time: t, name: p.name, phone: p.phone, status: 'booked', createdAt: Date.now(),
+      durationMin: L.domeDur(), payMin: Math.max(0, Number(sd.payMin) || 0), holdUntil: Date.now() + holdMs,
       lineUserId: uid || '', linkUntil: uid ? null : Date.now() + LINK_MS };
     store.data().bookings.push(b); store.save();
     if (uid) { line.push(uid, TEMPLATES.domeConfirm.text(S(), b)).catch(() => {}); notifyOwner(OWNER.booking(b)); }
@@ -379,9 +390,12 @@ export function mountNuad(app) {
     const b = find(req.params.id);
     if (!b || b.kind !== 'dome') return res.status(404).json({ error: 'ไม่พบคิวนี้' });
     const a = req.params.action;
-    if (!['done', 'noshow', 'cancelled'].includes(a)) return res.status(400).json({ error: 'คำสั่งไม่ถูกต้อง' });
-    b.status = a; store.save();
-    res.json({ results: [] });
+    if (!['paid', 'done', 'noshow', 'cancelled'].includes(a)) return res.status(400).json({ error: 'คำสั่งไม่ถูกต้อง' });
+    b.status = a; if (a === 'paid') b.holdUntil = null;
+    store.save();
+    const results = [];
+    if (a === 'paid' && b.lineUserId) results.push({ sent: await line.push(b.lineUserId, TEMPLATES.domePaid.text(S(), b)) });
+    res.json({ results });
   });
 
   app.post('/api/admin/queue/:no/:action', requireAdmin, async (req, res) => {
@@ -441,6 +455,9 @@ export function mountNuad(app) {
       for (const k of ['open', 'close']) if (typeof o[k] === 'string' && TIME.test(o[k])) s[g][k] = o[k];
       if (Array.isArray(o.days)) s[g].days = o.days.map(Number).filter((x) => x >= 0 && x <= 6);
       if (g === 'dome' && o.slotMin != null) s.dome.slotMin = Math.min(120, Math.max(5, Number(o.slotMin) || 15));
+      if (g === 'dome' && o.durationMin != null) s.dome.durationMin = Math.min(240, Math.max(5, Number(o.durationMin) || 30));
+      if (g === 'dome' && o.payMin != null) s.dome.payMin = Math.max(0, Math.round(Number(o.payMin) || 0));
+      if (g === 'dome' && o.holdMin != null) s.dome.holdMin = Math.min(240, Math.max(5, Number(o.holdMin) || 30));
     }
     if (p.queue) {
       if (typeof p.queue.on === 'boolean') s.queue.on = p.queue.on;

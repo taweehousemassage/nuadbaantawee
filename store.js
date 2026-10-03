@@ -27,7 +27,9 @@ export const DEFAULT_SETTINGS = {
   teacherMin: 100,                 // ค่าครูขั้นต่ำ
 
   // โดมผู้สูงอายุ — จองฟรี ไม่ต้องโอน
-  dome: { on: true, days: [1, 2, 3, 4, 5], open: '09:00', close: '12:00', slotMin: 15, seats: 1 },
+  // slotMin = ระยะห่างของช่องเวลาที่ให้เลือก · durationMin = นวดจริงนานเท่าไร (กันคิวทับ)
+  // payMin = ยอดโอนขั้นต่ำก่อนยืนยันคิว · holdMin = กันคิวไว้กี่นาทีระหว่างรอโอน
+  dome: { on: true, days: [1, 2, 3, 4, 5], open: '09:00', close: '12:00', slotMin: 15, durationMin: 30, payMin: 100, holdMin: 30, seats: 1 },
   // นวดนอกสถานที่ — ลูกค้าขอ พี่หนึ่งกดรับงาน/เจรจา
   outcall: { on: true, days: [1, 2, 3, 4, 5], open: '13:00', close: '17:00' },
   // บัตรคิวหน้าร้าน (ปุ่มมุมขวาบน)
