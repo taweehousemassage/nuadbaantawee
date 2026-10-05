@@ -146,6 +146,11 @@ function render() {
     <textarea id="st-notices" name="notices" rows="3">${esc((s.notices || []).join('\n'))}</textarea>
     <p class="hint">LINE: ${D.line.on ? 'อัตโนมัติ ✓ ' + esc(D.line.oaId || '') : 'กดส่งเอง'} · บัญชีพี่หนึ่ง: ${s.ownerLinked ? 'ผูกแล้ว' : D.line.ownerCodeSet ? 'ยังไม่ผูก — ทักแชท OA ว่า "ผูกหมอนวด <รหัสลับ>"' : 'ยังไม่ได้ตั้ง OWNER_CODE'}</p>
     <button class="btn primary">บันทึก</button></form></details>
+  <details class="box"><summary>ตรวจระบบ (debug)</summary>
+    <p class="hint">เช็กว่าทุกอย่างชี้ไปบัญชีไลน์ตัวใหม่จริงไหม · ตั้งค่าอะไรยังขาด</p>
+    <button class="btn ghost sm" data-a="diag">ตรวจเดี๋ยวนี้</button>
+    <pre id="diag" class="diag">กดปุ่มด้านบนเพื่อตรวจ</pre>
+  </details>
     <p class="hint no-print" style="text-align:center"><a href="#" data-a="logout">ออกจากระบบ</a></p>`;
 
   $('#app').innerHTML = h;
@@ -211,6 +216,15 @@ const A = {
   shared: () => { setTimeout(() => { sheet = null; renderSheet(); }, 80); },
   print: () => window.print(),
   logout: () => { PASS = ''; try { sessionStorage.removeItem('nuad_pass'); } catch {} rLogin(); },
+  diag: async () => {
+    const box = document.querySelector('#diag'); if (!box) return;
+    box.textContent = 'กำลังตรวจ…';
+    try {
+      const r = await fetch('/api/admin/diag', { headers: { 'x-nuad-password': PASS } });
+      const j = await r.json();
+      box.textContent = JSON.stringify(j, null, 2);
+    } catch (e) { box.textContent = 'ตรวจไม่สำเร็จ: ' + e.message; }
+  },
 };
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-a]'); if (!el || el.disabled) return;

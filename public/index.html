@@ -44,14 +44,21 @@ const U = {
   // อื่น ๆ
   ticket: null, wname: store.get('nm') || '', wErr: '', myPhone: store.get('ph') || '', myList: null, busy: '',
   // ไลน์ (LIFF)
-  idToken: '', lineName: '', lineReady: false, dAmt: '',
+  idToken: '', lineName: '', lineReady: false, liffErr: '', dAmt: '',
 };
 const hasOA = () => P.line.on && P.line.oaId;
 const needLine = () => !!P.line.requireLink;                 // บังคับผูกไลน์ทุกการจอง
 const lineOK = () => !needLine() || !!U.idToken;
 async function lineLogin() {
-  if (!window.liff || !P.line.liffId) return toast('ยังเปิดการเข้าสู่ระบบไลน์ไม่ได้ ลองใหม่อีกครั้งนะคะ');
-  try { liff.login({ redirectUri: location.href }); } catch (e) { toast('เข้าสู่ระบบไลน์ไม่สำเร็จ: ' + e.message); }
+  if (!window.liff || !P.line.liffId) return toast(U.liffErr || 'ยังเปิดการเข้าสู่ระบบไลน์ไม่ได้ ลองใหม่อีกครั้งนะคะ');
+  if (!U.lineReady) { try { await liff.init({ liffId: P.line.liffId }); U.lineReady = true; U.liffErr = ''; } catch (e) { U.liffErr = e.message || String(e); render(); return toast('เข้าสู่ระบบไลน์ไม่สำเร็จ: ' + U.liffErr); } }
+  try { liff.login({ redirectUri: location.href }); } catch (e) { U.liffErr = e.message || String(e); render(); toast('เข้าสู่ระบบไลน์ไม่สำเร็จ: ' + U.liffErr); }
+}
+function lineBar() {
+  if (!needLine()) return '';
+  if (U.idToken) return `<p class="mastline ok">เข้าสู่ระบบไลน์แล้ว ✓${U.lineName ? ' · ' + esc(U.lineName) : ''}</p>`;
+  if (U.liffErr) return `<p class="mastline bad">เข้าสู่ระบบไลน์ไม่ได้ — ${esc(U.liffErr)}</p>`;
+  return `<p class="mastline"><button class="btn line sm" data-a="line-login">${LINE_SVG} เข้าสู่ระบบด้วยไลน์เพื่อจองคิว</button></p>`;
 }
 function lineGate(what) {
   if (lineOK()) return '';
@@ -62,7 +69,9 @@ function lineGate(what) {
 const addFriend = () => P.line.addFriend || addFriendHref(P.line.oaId);
 
 async function initLiff() {
-  if (!P.line.liffId || !window.liff) return;
+  if (!P.line.requireLink) return;
+  if (!P.line.liffId) { U.liffErr = 'ยังไม่ได้ตั้ง LIFF ID'; return; }
+  if (!window.liff) { U.liffErr = 'โหลดตัวเชื่อมไลน์ไม่ได้ ลองปิด-เปิดเน็ตแล้วรีเฟรชนะคะ'; return; }
   try {
     await liff.init({ liffId: P.line.liffId });
     U.lineReady = true;
@@ -72,7 +81,7 @@ async function initLiff() {
       if (U.lineName && !U.dName) U.dName = U.lineName;
       if (U.lineName && !U.oName) U.oName = U.lineName;
     }
-  } catch (e) { console.error('liff:', e.message); }
+  } catch (e) { U.liffErr = e.message || String(e); console.error('liff:', e); }
 }
 
 async function start() {
@@ -109,7 +118,7 @@ async function poll() {
 function head() {
   const s = P.settings;
   $('#mast').innerHTML = `<h1 class="mast-title"><span class="orn" aria-hidden="true"></span>${esc(s.shopName)}<span class="orn" aria-hidden="true"></span></h1>
-    <ul class="notices">${(s.notices || []).map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`;
+    <ul class="notices">${(s.notices || []).map((n) => `<li>${esc(n)}</li>`).join('')}</ul>${lineBar()}`;
   $('#foot').innerHTML = `${addFriend() ? `<a class="line-pill" href="${esc(addFriend())}" target="_blank" rel="noopener">${LINE_SVG}เพิ่มเพื่อน LINE ${esc(s.therapist)}</a><span>แจ้งคิว ส่งสลิป และทักถามได้ในแชทนี้</span>` : ''}
     <span><a href="/privacy.html">ความเป็นส่วนตัว</a> · <a href="/terms.html">ข้อกำหนดการใช้บริการ</a> · <a href="/admin" rel="nofollow">สำหรับ${esc(s.therapist)}</a></span>`;
 }
