@@ -31,6 +31,18 @@ export async function push(to, text) {
   if (!enabled() || !to) return false;
   try { return await call('push', { to, messages: [{ type: 'text', text }] }); } catch (e) { console.error('จองนวด:', e.message); return false; }
 }
+// อ่านข้อมูลจาก LINE (ใช้ตรวจระบบ) — บอกว่า access token เป็นของ OA ไหนจริง ๆ
+async function getJson(path) {
+  if (!enabled()) return { error: 'ยังไม่ได้ตั้ง LINE_CHANNEL_ACCESS_TOKEN' };
+  try {
+    const r = await fetch('https://api.line.me/v2/bot/' + path, { headers: { Authorization: 'Bearer ' + token() } });
+    const j = await r.json().catch(() => ({}));
+    return r.ok ? j : { httpStatus: r.status, ...j };
+  } catch (e) { return { error: e.message }; }
+}
+export const botInfo = () => getJson('info');
+export const webhookInfo = () => getJson('channel/webhook/endpoint');
+
 // การ์ดสวย (Flex) — f = { altText, contents }  ·  ถ้าส่ง flex ไม่ได้จะ fallback เป็นข้อความ altText
 export async function replyFlex(replyToken, f) {
   if (!enabled() || !replyToken) return false;

@@ -33,7 +33,7 @@ node server.js           # http://localhost:3000
 1. GitHub repo ใหม่ → อัปทั้งโฟลเดอร์ (ยกเว้น `node_modules/`, `.env`, `data/`)
 2. Render → New → Blueprint (มี `render.yaml`) → ใส่ Environment ตาม `.env.example`
 3. cron-job.org ยิง `<เว็บ>/health` (Render ฟรี 750 ชม./เดือน/บัญชี — ถ้ามีหลายเว็บต้องแบ่งช่วงเวลา ping)
-4. LINE Developers (OA `@489aqigt`) → Messaging API → Webhook URL = `<เว็บ>/api/line/webhook` → Verify → เปิด Use webhook
+4. LINE Developers (OA `@923frfkh`) → Messaging API → Webhook URL = `<เว็บ>/api/line/webhook` → Verify → เปิด Use webhook
 5. `/admin` → ตั้งค่า: พร้อมเพย์ · **พิกัดบ้านโนนขี้ตุ่น (วางลิงก์ Google Maps ได้เลย)** · เวลาโดม/นอกสถานที่ · ค่าครูขั้นต่ำ
 6. ไลน์ส่วนตัวพี่หนึ่งทักแชท OA: `ผูกหมอนวด <OWNER_CODE>` → จากนั้นงานใหม่จะเด้งเข้าไลน์
 

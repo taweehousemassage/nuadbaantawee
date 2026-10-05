@@ -340,6 +340,48 @@ export function mountNuad(app) {
     if ((req.get('x-nuad-password') || '') !== adminPass()) return res.status(401).json({ error: 'รหัสผ่านไม่ถูกต้อง' });
     next();
   }
+  // ---------- ตรวจระบบ (ใช้ดูว่าทุกอย่างชี้ไป OA ตัวใหม่จริงไหม)
+  app.get('/api/admin/diag', requireAdmin, async (req, res) => {
+    const s = S();
+    const keys = ['ADMIN_PASSWORD', 'OWNER_CODE', 'MONGODB_URI', 'PUBLIC_BASE_URL',
+      'LINE_CHANNEL_SECRET', 'LINE_CHANNEL_ACCESS_TOKEN', 'LINE_OA_ID', 'LINE_ADD_FRIEND_URL',
+      'LINE_LOGIN_CHANNEL_ID', 'LINE_LIFF_ID'];
+    const envStatus = {};
+    for (const k of keys) envStatus[k] = env(k) ? 'ตั้งแล้ว' : '⚠️ ยังไม่ได้ตั้ง';
+    const [bot, hook] = await Promise.all([line.botInfo(), line.webhookInfo()]);
+    const oaEnv = String(env('LINE_OA_ID') || '').replace(/^@/, '');
+    const oaReal = String(bot?.basicId || '').replace(/^@/, '');
+    res.json({
+      เวลาไทย: L.nowBKK(),
+      ฐานข้อมูล: store.storageMode(),
+      env: envStatus,
+      ไลน์: {
+        OAจริงของtoken: bot?.basicId || bot,
+        ชื่อOA: bot?.displayName || null,
+        OAในenv: env('LINE_OA_ID'),
+        ตรงกันไหม: oaEnv && oaReal ? (oaEnv === oaReal ? '✅ ตรงกัน' : '❌ ไม่ตรง — token ยังเป็นของ OA เก่า') : '⚠️ ตรวจไม่ได้',
+        ลิงก์เพิ่มเพื่อน: env('LINE_ADD_FRIEND_URL'),
+        webhookที่LINEเก็บไว้: hook?.endpoint || hook,
+        webhookเปิดอยู่: hook?.active ?? null,
+        เว็บนี้คือ: (env('PUBLIC_BASE_URL') || '').replace(/\/$/, '') + '/api/line/webhook',
+        LIFF: env('LINE_LIFF_ID') || null,
+        LoginChannel: env('LINE_LOGIN_CHANNEL_ID') || null,
+        บังคับผูกไลน์: !!(env('LINE_LIFF_ID') && env('LINE_LOGIN_CHANNEL_ID')),
+        ผูกไลน์พี่หนึ่งแล้ว: !!owner(),
+      },
+      ร้าน: {
+        พิกัดจุดเริ่มต้น: validPoint(s.origin) ? `${s.origin.lat}, ${s.origin.lng}` : '⚠️ ยังไม่ได้ตั้ง — คิดค่าเดินทางไม่ได้',
+        พร้อมเพย์: s.pp ? 'ตั้งแล้ว' : '⚠️ ยังไม่ได้ตั้ง — ไม่ขึ้น QR',
+        โดม: s.dome,
+        นอกสถานที่: s.outcall,
+      },
+      จำนวนรายการ: {
+        การจองทั้งหมด: store.data().bookings.length,
+        คิววันนี้: L.todayQueue().length,
+      },
+    });
+  });
+
   app.post('/api/admin/login', (req, res) => {
     if (!adminPass()) return res.status(500).json({ error: 'ยังไม่ได้ตั้ง ADMIN_PASSWORD' });
     if ((req.body?.password || '') !== adminPass()) return res.status(401).json({ error: 'รหัสผ่านไม่ถูกต้อง' });
