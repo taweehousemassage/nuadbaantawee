@@ -23,7 +23,7 @@
 <main class="wrap wide" id="main"></main>
 <footer class="bbfoot" id="foot"></footer>
 <div id="toast" role="status" aria-live="polite"></div>
-<script src="https://static.line.me/liff/edge/2/sdk.js"></script>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script src="/vendor/qrcode-generator.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module">
@@ -49,15 +49,32 @@ const U = {
 const hasOA = () => P.line.on && P.line.oaId;
 const needLine = () => !!P.line.requireLink;                 // บังคับผูกไลน์ทุกการจอง
 const lineOK = () => !needLine() || !!U.idToken;
+const LIFF_SRC = ['https://static.line-scdn.net/liff/edge/2/sdk.js', 'https://static.line.me/liff/edge/2/sdk.js'];
+function loadScript(src) {
+  return new Promise((res) => {
+    if ([...document.scripts].some((x) => x.src === src && x.dataset.tried)) return res(!!window.liff);
+    const s = document.createElement('script');
+    s.src = src; s.async = false; s.dataset.tried = '1';
+    s.onload = () => res(true); s.onerror = () => res(false);
+    document.head.appendChild(s);
+    setTimeout(() => res(!!window.liff), 8000);
+  });
+}
+async function loadLiff() {            // static.line.me เคยคืน 503 จึงต้องมีโฮสต์สำรอง
+  for (const src of LIFF_SRC) { await loadScript(src); if (window.liff) return true; }
+  return false;
+}
 async function lineLogin() {
+  if (!window.liff) await loadLiff();
   if (!window.liff || !P.line.liffId) return toast(U.liffErr || 'ยังเปิดการเข้าสู่ระบบไลน์ไม่ได้ ลองใหม่อีกครั้งนะคะ');
+  U.liffErr = '';
   if (!U.lineReady) { try { await liff.init({ liffId: P.line.liffId }); U.lineReady = true; U.liffErr = ''; } catch (e) { U.liffErr = e.message || String(e); render(); return toast('เข้าสู่ระบบไลน์ไม่สำเร็จ: ' + U.liffErr); } }
   try { liff.login({ redirectUri: location.href }); } catch (e) { U.liffErr = e.message || String(e); render(); toast('เข้าสู่ระบบไลน์ไม่สำเร็จ: ' + U.liffErr); }
 }
 function lineBar() {
   if (!needLine()) return '';
   if (U.idToken) return `<p class="mastline ok">เข้าสู่ระบบไลน์แล้ว ✓${U.lineName ? ' · ' + esc(U.lineName) : ''}</p>`;
-  if (U.liffErr) return `<p class="mastline bad">เข้าสู่ระบบไลน์ไม่ได้ — ${esc(U.liffErr)}</p>`;
+  if (U.liffErr) return `<p class="mastline bad">เข้าสู่ระบบไลน์ไม่ได้ — ${esc(U.liffErr)} <button class="btn line sm" data-a="line-login">ลองอีกครั้ง</button></p>`;
   return `<p class="mastline"><button class="btn line sm" data-a="line-login">${LINE_SVG} เข้าสู่ระบบด้วยไลน์เพื่อจองคิว</button></p>`;
 }
 function lineGate(what) {
@@ -71,6 +88,7 @@ const addFriend = () => P.line.addFriend || addFriendHref(P.line.oaId);
 async function initLiff() {
   if (!P.line.requireLink) return;
   if (!P.line.liffId) { U.liffErr = 'ยังไม่ได้ตั้ง LIFF ID'; return; }
+  if (!window.liff) await loadLiff();
   if (!window.liff) { U.liffErr = 'โหลดตัวเชื่อมไลน์ไม่ได้ ลองปิด-เปิดเน็ตแล้วรีเฟรชนะคะ'; return; }
   try {
     await liff.init({ liffId: P.line.liffId });
