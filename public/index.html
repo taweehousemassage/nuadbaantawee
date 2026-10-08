@@ -75,21 +75,21 @@ function lineBar() {
   if (!needLine()) return '';
   if (U.idToken) return `<p class="mastline ok">เข้าสู่ระบบไลน์แล้ว ✓${U.lineName ? ' · ' + esc(U.lineName) : ''}</p>`;
   if (U.liffErr) return `<p class="mastline bad">เข้าสู่ระบบไลน์ไม่ได้ — ${esc(U.liffErr)} <button class="btn line sm" data-a="line-login">ลองอีกครั้ง</button></p>`;
-  const inApp = openInLineBtn('sm');
-  return `<p class="mastline">${inApp}<button class="btn ${inApp ? 'ghost' : 'line'} sm" data-a="line-login">${inApp ? '' : LINE_SVG + ' '}เข้าสู่ระบบด้วยไลน์เพื่อจองคิว</button></p>`;
+  return `<p class="mastline">${lineBtn('sm', 'เข้าสู่ระบบด้วยไลน์เพื่อจองคิว')}</p>`;
 }
 function lineGate(what) {
   if (lineOK()) return '';
   return `<div class="note info linegate"><b>ต้องผูกไลน์ก่อน${esc(what)}</b>
     <span>${esc(P.settings.therapist)}จะส่งคำยืนยันและอัปเดตทั้งหมดทางไลน์ กดปุ่มด้านล่างครั้งเดียวพอค่ะ</span>
-    ${openInLineBtn('full')}
-    <button class="btn ${openInLineBtn('full') ? 'ghost' : 'line'} full" data-a="line-login">เข้าสู่ระบบด้วยอีเมล/รหัสไลน์แทน</button></div>`;
+    ${lineBtn('full', 'เข้าสู่ระบบด้วยไลน์')}</div>`;
 }
 const addFriend = () => P.line.addFriend || addFriendHref(P.line.oaId);
 const liffHref = () => (P.line.liffId ? 'https://liff.line.me/' + P.line.liffId : '');
 const inLineApp = () => { try { return !!(window.liff && liff.isInClient()); } catch { return false; } };
-// เปิดผ่านเบราว์เซอร์ LINE จะให้กรอกอีเมล/รหัส · เปิดผ่านลิงก์ LIFF ในมือถือจะเด้งเข้าแอปและรู้จักผู้ใช้เลย
-const openInLineBtn = (cls) => (liffHref() && !inLineApp() ? `<a class="btn line ${cls}" href="${liffHref()}">${LINE_SVG} เปิดในแอปไลน์ · ไม่ต้องกรอกรหัส</a>` : '');
+// อยู่นอกแอปไลน์ → ส่งไปลิงก์ LIFF ให้เด้งเข้าแอปไลน์ (ไม่ต้องกรอกอีเมล/รหัสในเว็บ) · อยู่ในแอปอยู่แล้ว → liff.login() พอ
+const lineBtn = (cls, label) => (inLineApp() || !liffHref()
+  ? `<button class="btn line ${cls}" data-a="line-login">${LINE_SVG} ${label}</button>`
+  : `<a class="btn line ${cls}" href="${liffHref()}">${LINE_SVG} ${label}</a>`);
 
 async function initLiff() {
   if (!P.line.requireLink) return;
