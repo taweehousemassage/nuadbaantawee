@@ -114,6 +114,7 @@ button,input{font:inherit;color:inherit}
 .mastline.ok{color:#7FD6A2}
 .mastline.bad{color:#F2A08C}
 .mastline .btn.line{max-width:320px}
+.mastline .btn.ghost{color:var(--lac-gold);border-color:var(--lac-gold)}
 .diag{margin:10px 0 0;padding:12px;border:1px solid var(--line);border-radius:4px;background:var(--surface);
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;
   word-break:break-word;max-height:420px;overflow:auto}
