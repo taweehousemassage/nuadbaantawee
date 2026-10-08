@@ -66,7 +66,7 @@ async function loadLiff() {            // static.line.me เคยคืน 503 
 }
 async function lineLogin() {
   // ไม่ได้อยู่ในแอปไลน์ → พาไปลิงก์ LIFF ให้เด้งเข้าแอป แทนที่จะให้กรอกอีเมล/รหัสในเว็บ
-  if (!inLineApp() && liffHref()) { location.href = liffHref(); return; }
+  if (!inLineApp() && liffHref()) return openLine();
   if (!window.liff) await loadLiff();
   if (!window.liff || !P.line.liffId) return toast(U.liffErr || 'ยังเปิดการเข้าสู่ระบบไลน์ไม่ได้ ลองใหม่อีกครั้งนะคะ');
   U.liffErr = '';
@@ -89,9 +89,23 @@ const addFriend = () => P.line.addFriend || addFriendHref(P.line.oaId);
 const liffHref = () => (P.line.liffId ? 'https://liff.line.me/' + P.line.liffId : '');
 const inLineApp = () => { try { return !!(window.liff && liff.isInClient()); } catch { return false; } };
 // อยู่นอกแอปไลน์ → ส่งไปลิงก์ LIFF ให้เด้งเข้าแอปไลน์ (ไม่ต้องกรอกอีเมล/รหัสในเว็บ) · อยู่ในแอปอยู่แล้ว → liff.login() พอ
+const liffScheme = () => (P.line.liffId ? 'line://app/' + P.line.liffId : '');
+// บนมือถือ ลองยิง line:// ให้แอปไลน์เด้งขึ้นก่อน · ถ้าแอปไม่เปิดภายใน 1.5 วิ ค่อยถอยไปลิงก์เว็บของ LIFF
+function openLine() {
+  const scheme = liffScheme(), web = liffHref();
+  if (!scheme) { if (web) location.href = web; return; }
+  let left = false;
+  const onHide = () => { left = true; };
+  document.addEventListener('visibilitychange', onHide, { once: true });
+  setTimeout(() => {
+    document.removeEventListener('visibilitychange', onHide);
+    if (!left && !document.hidden && web) location.href = web;
+  }, 1500);
+  location.href = scheme;
+}
 const lineBtn = (cls, label) => (inLineApp() || !liffHref()
   ? `<button class="btn line ${cls}" data-a="line-login">${LINE_SVG} ${label}</button>`
-  : `<a class="btn line ${cls}" href="${liffHref()}">${LINE_SVG} ${label}</a>`);
+  : `<button class="btn line ${cls}" data-a="line-open">${LINE_SVG} ${label}</button>`);
 
 async function initLiff() {
   if (!P.line.requireLink) return;
@@ -352,6 +366,7 @@ const A = {
   'd-date': async (v) => { U.dDate = v; U.dTime = null; await loadDomeSlots(); },
   'd-time': (v) => { U.dTime = Number(v); U.dErr = ''; },
   'line-login': () => lineLogin(),
+  'line-open': () => openLine(),
   'd-book': async () => {
     if (!lineOK()) return lineLogin();
     U.busy = 'dome'; render();
