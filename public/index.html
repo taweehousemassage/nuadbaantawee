@@ -65,6 +65,8 @@ async function loadLiff() {            // static.line.me เคยคืน 503 
   return false;
 }
 async function lineLogin() {
+  // ไม่ได้อยู่ในแอปไลน์ → พาไปลิงก์ LIFF ให้เด้งเข้าแอป แทนที่จะให้กรอกอีเมล/รหัสในเว็บ
+  if (!inLineApp() && liffHref()) { location.href = liffHref(); return; }
   if (!window.liff) await loadLiff();
   if (!window.liff || !P.line.liffId) return toast(U.liffErr || 'ยังเปิดการเข้าสู่ระบบไลน์ไม่ได้ ลองใหม่อีกครั้งนะคะ');
   U.liffErr = '';
